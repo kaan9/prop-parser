@@ -1,0 +1,11 @@
+propositional logic parser
+---------------------------------
+
+S -> id
+S -> '(' P ')'
+
+P -> S
+P -> '¬' S
+P -> S '∧' S
+P -> S '∨' S
+P -> S '→' S
