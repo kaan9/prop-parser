@@ -1,6 +1,8 @@
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 
 typedef struct P P;
 typedef struct S S;
@@ -24,22 +26,80 @@ struct P {
 	} u;
 };
 
+
 /* current token */
-struct {
+struct token {
 	enum token_type { ID, LPAREN, RPAREN, LNEG, LAND, LOR, LIMPL, NONE } type;
 	char *id;	/* only used when type == ID, must be copied */
-} token;
+};
 
-/* fetches next token, puts it into 'token', does not free id */
-void next(void)
+/* does not own the program source, only points to it */
+struct parser {
+	struct token curr_token;
+	struct token (*next_token)(char **str);
+	char *prog_pos;
+};
+
+void *kalloc(size_t size);
+
+/* returns first token in the string pointed by *s and increments *s to the position
+ * immediately after the token if it exists, also allocs and sets sets id if the token is an ID
+ * otherwise id == NULL and free(id) can be called safely
+ */
+struct token lex_token(char **str)
 {
-	static int i = 0;
-	enum token_type tokens[] = { LPAREN, LPAREN, ID, LIMPL, ID, RPAREN, LIMPL, ID, RPAREN, LOR,
-		LPAREN, ID, LAND, LPAREN, ID, LIMPL, ID, RPAREN, RPAREN, NONE };
-	char *id = "p";
-	token.id = id;
-	token.type = tokens[i++];
+	char *s = *str, *p = *str;
+	struct token tok = {NONE, NULL}; /* invalid input if no character matched */
+
+	while (isspace(*s))
+		s++;
+	switch (*s) {
+	case '(':
+		*str = s + 1;
+		tok.type = LPAREN;
+		break;
+	case ')':
+		*str = s + 1;
+		tok.type = RPAREN;
+		break;
+	case '!': /* C doesn't have unicode support :( */
+		*str = s + 1;
+		tok.type = LNEG;
+		break;
+	case '&':
+		*str = s + 1;
+		tok.type = LAND;
+		break;
+	case '|':
+		*str = s + 1;
+		tok.type = LOR;
+		break;
+	case '>':
+		*str = s + 1;
+		tok.type = LIMPL;
+		break;
+	default:
+		if (isalnum(*s)) {
+			while (isalnum(*p))
+				p++;
+			tok.id = kalloc(sizeof(*(tok.id)) * (p - s + 1));
+			strncpy(tok.id, s, p - s);
+			tok.id[p-s] = '\0';
+			*str = p;
+			tok.type = ID;
+		}
+	}
+	printf("Got token [type: %d, id: %s]\n", tok.type, tok.id);
+	return tok;
 }
+
+/* makes parse fetch next token */
+void next(struct parser *p)
+{
+	free(p->curr_token.id);
+	p->curr_token = (*(p->next_token))(&p->prog_pos);
+}
+
 
 void *kalloc(size_t size)
 {
@@ -65,27 +125,27 @@ char *kstrdup(const char *s)
 	return p;
 }
 
-P *parse_P();
+P *parse_P(struct parser *parser);
 
 /* parse a subproposition */
 /* assumes a valid token has been loaded */
-S *parse_S(void)
+S *parse_S(struct parser *parser)
 {
 	S *s = kalloc(sizeof(*s));	
 	
-	if (token.type == ID) {
+	if (parser->curr_token.type == ID) {
 		s->type = S_ID;
-		s->u.id = kstrdup(token.id);
-		next();
-	} else if (token.type == LPAREN) {
+		s->u.id = kstrdup(parser->curr_token.id);
+		next(parser);
+	} else if (parser->curr_token.type == LPAREN) {
 		s->type = S_P;
-		next();
-		s->u.P_child = parse_P();
-		if (token.type != RPAREN) {
+		next(parser);
+		s->u.P_child = parse_P(parser);
+		if (parser->curr_token.type != RPAREN) {
 			fprintf(stderr, "Error, expected ')'\n");
 			abort();
 		}
-		next();
+		next(parser);
 	} else {
 		fprintf(stderr, "Error, unexpected token when parsing S\n");
 		abort();
@@ -94,18 +154,18 @@ S *parse_S(void)
 }
 
 /* parse a proposition */
-P *parse_P(void)
+P *parse_P(struct parser *parser)
 {
 	P *p = kalloc(sizeof(*p));
 
-	if (token.type == LNEG) {
+	if (parser->curr_token.type == LNEG) {
 		p->type = P_neg;
-		next();
-		p->u.S_child = parse_S();
+		next(parser);
+		p->u.S_child = parse_S(parser);
 	} else {
-		p->u.S_pair.l_child = parse_S();
+		p->u.S_pair.l_child = parse_S(parser);
 
-		switch (token.type) {
+		switch (parser->curr_token.type) {
 		case LAND:
 			p->type = P_and;
 			break;
@@ -120,8 +180,8 @@ P *parse_P(void)
 			p->u.S_child = p->u.S_pair.l_child;
 			return p;
 		}
-		next();
-		p->u.S_pair.r_child = parse_S();
+		next(parser);
+		p->u.S_pair.r_child = parse_S(parser);
 	}
 	return p;
 }
@@ -221,10 +281,12 @@ void print_P(P *p, int level)
 
 int main(void)
 {
+	char *prog = "((!(a&b))|(c>(!d)))";
+	struct parser p = {{NONE, NULL}, &lex_token, prog};
 	P *prop;
 
-	next();
-	prop = parse_P();
+	next(&p);
+	prop = parse_P(&p);
 	print_P(prop, 0);
 	free(prop);
 	printf("done\n");
