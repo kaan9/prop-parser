@@ -9,3 +9,10 @@ P -> '¬' S
 P -> S '∧' S
 P -> S '∨' S
 P -> S '→' S
+
+
+The actual symbols use are !, &, |, > to restrict the alphabet to ASCII.
+
+An example proposition is 
+((!(a&b))|(c>(!d)))
+which is parsed as shown in example-tree.png.
